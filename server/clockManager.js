@@ -40,6 +40,7 @@ function initClock(roomId, timeControl) {
         activeSide: null,
         intervalId: null,
         lastTick: null,
+        turnStartTimestamp: null,
         timeoutCallback: null,
     });
     console.log(`[Clock] Initialized ${roomId}: ${tc.initial}s / +${tc.increment}`);
@@ -63,6 +64,7 @@ function startClock(roomId, side = 'white') {
 
     clock.activeSide = side;
     clock.lastTick = Date.now();
+    clock.turnStartTimestamp = Date.now();
 
     if (clock.intervalId) clearInterval(clock.intervalId);
 
@@ -163,7 +165,9 @@ function switchClock(roomId) {
 
     const now = Date.now();
     const elapsed = (now - (clock.lastTick || now)) / 1000;
-    const timeSpent = elapsed;
+
+    // Real thinking time = time since turn started (not since last tick)
+    const timeSpent = Math.round(((now - (clock.turnStartTimestamp || now)) / 1000) * 100) / 100;
 
     if (clock.activeSide === 'white') {
         clock.whiteTimeLeft = Math.max(0, clock.whiteTimeLeft - elapsed);
@@ -173,8 +177,9 @@ function switchClock(roomId) {
         clock.activeSide = 'white';
     }
     clock.lastTick = now;
+    clock.turnStartTimestamp = now;
 
-    console.log(`[Clock] ${roomId} switched to ${clock.activeSide}, spent ${timeSpent}s`);
+    console.log(`[Clock] ${roomId} switched to ${clock.activeSide}, timeSpent=${timeSpent}s`);
     return { timeSpent };
 }
 

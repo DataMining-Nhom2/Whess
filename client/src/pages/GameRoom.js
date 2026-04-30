@@ -350,8 +350,9 @@ export default function GameRoom() {
     const resultReasonLabel = {
         checkmate: 'Chiếu bí',
         timeout: 'Hết giờ',
-        resign: 'Đối thủ xin thua',
-        stalemate: 'Pat',
+        resign: 'Xin thua',
+        stalemate: 'Pat (hết nước đi)',
+        draw: 'Hòa',
     }[gameOverData?.reason] || '';
 
     const squareStyles = useMemo(() => inCheck ? getCheckSquareStyles(fen) : {}, [inCheck, fen]);

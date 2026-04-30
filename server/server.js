@@ -194,6 +194,8 @@ io.on('connection', (socket) => {
         const { timeSpent } = clockManager.switchClock(roomId);
         room.clockTimes.push(timeSpent);
 
+        console.log(`[Move] ${roomId}: ${san} by ${color}, timeSpent=${timeSpent}s, move#=${room.moves.length}`);
+
         const times = clockManager.getTimes(roomId);
         const activeSide = clockManager.getActiveSide(roomId);
 

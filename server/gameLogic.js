@@ -37,6 +37,18 @@ function detectGameOver(fen) {
         return { isOver: true, result: '1/2-1/2', reason: 'stalemate' };
     }
 
+    if (chess.isThreefoldRepetition()) {
+        return { isOver: true, result: '1/2-1/2', reason: 'draw' };
+    }
+
+    if (chess.isInsufficientMaterial()) {
+        return { isOver: true, result: '1/2-1/2', reason: 'draw' };
+    }
+
+    if (chess.isDraw()) {
+        return { isOver: true, result: '1/2-1/2', reason: 'draw' };
+    }
+
     return { isOver: false, result: null, reason: null };
 }
 
