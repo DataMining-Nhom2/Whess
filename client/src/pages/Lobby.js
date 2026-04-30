@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Box, Button, TextField, Typography, Paper,
@@ -12,25 +12,50 @@ export default function Lobby() {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
+    const roomInputRef = useRef('');
+    const createRoomActiveRef = useRef(false);
+
+    // ─── Persistent socket listeners ─────────────────────────────────────────────
+    useEffect(() => {
+        socket.on('room_created', ({ roomId }) => {
+            if (createRoomActiveRef.current) {
+                createRoomActiveRef.current = false;
+                navigate(`/room/${roomId}`);
+            }
+        });
+
+        socket.on('join_result', (res) => {
+            setLoading(false);
+            if (res.error) {
+                setError(res.error.message || 'Không thể vào phòng');
+            } else {
+                navigate(`/room/${roomInputRef.current}`);
+            }
+        });
+
+        return () => {
+            socket.off('room_created');
+            socket.off('join_result');
+        };
+    }, [navigate]);
+
     const handleCreateRoom = () => {
         setLoading(true);
-        socket.emit('create_room', ({ roomId }) => {
-            navigate(`/room/${roomId}`);
-        });
+        createRoomActiveRef.current = true;
+        socket.emit('create_room');
     };
 
     const handleJoinRoom = () => {
         if (!roomInput.trim()) return;
+        roomInputRef.current = roomInput.trim();
         setLoading(true);
         setError('');
-        socket.emit('join_room', { roomId: roomInput.trim() }, (res) => {
-            setLoading(false);
-            if (res.error) {
-                setError(res.message || 'Không thể vào phòng');
-            } else {
-                navigate(`/room/${roomInput.trim()}`);
-            }
-        });
+        socket.emit('join_room', { roomId: roomInput.trim() });
+    };
+
+    const handleInputChange = (e) => {
+        setRoomInput(e.target.value);
+        roomInputRef.current = e.target.value;
     };
 
     return (
@@ -67,7 +92,7 @@ export default function Lobby() {
                         label="Nhập mã phòng"
                         value={roomInput}
                         onChange={(e) => {
-                            setRoomInput(e.target.value);
+                            handleInputChange(e);
                             setError('');
                         }}
                         onKeyDown={(e) => e.key === 'Enter' && handleJoinRoom()}

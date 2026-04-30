@@ -86,6 +86,12 @@ io.on('connection', (socket) => {
 
     // --- Create Room ---
     socket.on('create_room', () => {
+        // Leave any previous room first to avoid orphaned rooms
+        const prevRoom = socket.data.roomId;
+        if (prevRoom) {
+            socket.leave(prevRoom);
+        }
+
         const { roomId } = roomManager.createRoom();
         socket.join(roomId);
 
@@ -99,15 +105,21 @@ io.on('connection', (socket) => {
     });
 
     // --- Join Room ---
-    socket.on('join_room', ({ roomId }, callback) => {
+    socket.on('join_room', ({ roomId }) => {
         if (!roomId) {
-            return callback({ error: { code: 'INVALID', message: 'Thiếu mã phòng' } });
+            return socket.emit('join_result', { error: { code: 'INVALID', message: 'Thiếu mã phòng' } });
+        }
+
+        // Leave any previous room first
+        const prevRoom = socket.data.roomId;
+        if (prevRoom) {
+            socket.leave(prevRoom);
         }
 
         const result = roomManager.joinRoom(roomId, socket.id);
 
         if (result.error) {
-            return callback({ error: { code: result.error.code, message: result.error.message } });
+            return socket.emit('join_result', { error: { code: result.error.code, message: result.error.message } });
         }
 
         socket.join(roomId);
@@ -117,7 +129,7 @@ io.on('connection', (socket) => {
         const room = roomManager.getRoom(roomId);
         const times = clockManager.getTimes(roomId);
 
-        callback({
+        socket.emit('join_result', {
             success: true,
             color: result.color,
             roomId,
@@ -127,6 +139,7 @@ io.on('connection', (socket) => {
             blackTime: room.blackTimeLeft,
             moves: room.moves,
             clockTimes: room.clockTimes,
+            status: room.status,
         });
 
         // Notify opponent
@@ -230,20 +243,22 @@ io.on('connection', (socket) => {
         if (!roomId || !color) return;
 
         const room = roomManager.getRoom(roomId);
-        if (!room) return;
+        if (room) {
+            socket.to(roomId).emit('opponent_left');
 
-        socket.to(roomId).emit('opponent_left');
-
-        if (room.status === 'waiting') {
-            // No opponent yet, just leave
-            roomManager.cleanupRoom(roomId);
-            clockManager.deleteClock(roomId);
-            socket.leave(roomId);
-        } else if (room.status === 'playing') {
-            // Treat as resign
-            const result = color === 'white' ? '0-1' : '1-0';
-            handleGameOver(roomId, result, 'resign', io);
+            if (room.status === 'waiting') {
+                roomManager.cleanupRoom(roomId);
+                clockManager.deleteClock(roomId);
+            } else if (room.status === 'playing') {
+                const result = color === 'white' ? '0-1' : '1-0';
+                handleGameOver(roomId, result, 'resign', io);
+            }
         }
+
+        // Always leave the socket.io room and clear socket data
+        socket.leave(roomId);
+        delete socket.data.roomId;
+        delete socket.data.color;
     });
 
     // --- Play Again ---
@@ -280,15 +295,15 @@ io.on('connection', (socket) => {
     });
 
     // --- Reconnect ---
-    socket.on('reconnect', ({ roomId, sessionToken }, callback) => {
+    socket.on('reconnect', ({ roomId, sessionToken }) => {
         if (!sessionToken) {
-            return callback({ error: 'No session token' });
+            return socket.emit('reconnect_result', { error: 'No session token' });
         }
 
         const { success, color, roomState } = roomManager.restoreSession(sessionToken, socket.id);
 
         if (!success || !roomState) {
-            return callback({ error: 'Session not found or expired' });
+            return socket.emit('reconnect_result', { error: 'Session not found or expired' });
         }
 
         socket.join(roomId);
@@ -298,7 +313,7 @@ io.on('connection', (socket) => {
         const times = clockManager.getTimes(roomId);
         const activeSide = clockManager.getActiveSide(roomId);
 
-        callback({
+        socket.emit('reconnect_result', {
             success: true,
             color,
             roomId,
@@ -321,7 +336,7 @@ io.on('connection', (socket) => {
         const roomId = socket.data.roomId;
         const color = socket.data.color;
 
-        if (!roomId || !color) return;
+        if (!roomId || !color) return; // Intentional exit already handled
 
         const room = roomManager.getRoom(roomId);
         if (!room) return;
@@ -341,10 +356,6 @@ io.on('connection', (socket) => {
             // Notify opponent
             socket.to(roomId).emit('opponent_disconnected');
         }
-
-        // Clean up socket data
-        delete socket.data.roomId;
-        delete socket.data.color;
 
         console.log(`[Socket] ${socket.id} (${color}) disconnected from ${roomId}`);
     });

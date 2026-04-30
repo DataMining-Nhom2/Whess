@@ -7,9 +7,13 @@
     "server": "cd server && npm run start",
     "client": "cd client && npm run start",
     "build": "cd client && npm run build",
-    "install:all": "npm install && cd server && npm install && cd ../client && npm install"
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "test:e2e": "node tests/e2e/run-tests.js",
+    "test:unit": "node test-unit.js",
+    "test:socket": "node test-socket.js"
   },
   "devDependencies": {
+    "@playwright/test": "^1.44.0",
     "concurrently": "^8.2.2"
   },
   "dependencies": {

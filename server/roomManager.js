@@ -119,6 +119,13 @@ function joinRoom(roomId, socketId) {
         return { success: false, color: null, sessionToken: null, error: { code: 'ROOM_FINISHED', message: 'Ván đấu đã kết thúc' } };
     }
 
+    if (room.players.white === socketId) {
+        return { success: true, color: 'white', sessionToken: room.sessionTokens.white, error: null };
+    }
+    if (room.players.black === socketId) {
+        return { success: true, color: 'black', sessionToken: room.sessionTokens.black, error: null };
+    }
+
     let color = null;
     if (room.players.white === null) {
         room.players.white = socketId;
@@ -260,10 +267,18 @@ function handleDisconnect(roomId, color) {
 
     console.log(`[RoomManager] Player ${color} disconnected from ${roomId}`);
 
-    // Check if both disconnected
-    if (room.players.white === null && room.players.black === null) {
+    // If only one player was in the room (waiting state), remove the room immediately.
+    // If both players were in (playing state), only nullify — room stays for reconnect window.
+    if (room.status === 'waiting') {
+        // Single player left a waiting room → clean up immediately
+        rooms.delete(roomId);
+        cancelRoomCleanup(roomId);
+        console.log(`[RoomManager] Room ${roomId} cleaned up (was in waiting state)`);
+    } else {
         // Both disconnected → cleanup timer 30s
-        scheduleRoomCleanup(roomId, 30000);
+        if (room.players.white === null && room.players.black === null) {
+            scheduleRoomCleanup(roomId, 30000);
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
@@ -6,12 +6,12 @@ import {
     Box, Typography, Paper, Stack, Button, Chip,
 } from '@mui/material';
 import socket from '../socket';
-import GameClock from '../components/GameClock';
+import PlayerCard from '../components/PlayerCard';
 
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 const RANKS = ['8', '7', '6', '5', '4', '3', '2', '1'];
 
-function getCheckSquareStyles(fen, orientation) {
+function getCheckSquareStyles(fen) {
     const chess = new Chess(fen);
     if (!chess.inCheck()) return {};
 
@@ -33,16 +33,8 @@ function getCheckSquareStyles(fen, orientation) {
 
     if (!kingSquare) return {};
 
-    // Convert square based on orientation
-    let displaySquare = kingSquare;
-    if (orientation === 'black') {
-        const file = kingSquare[0];
-        const rank = kingSquare[1];
-        displaySquare = FILES[7 - FILES.indexOf(file)] + RANKS[7 - RANKS.indexOf(rank)];
-    }
-
     return {
-        [displaySquare]: { backgroundColor: 'rgba(255, 0, 0, 0.4)' },
+        [kingSquare]: { backgroundColor: 'rgba(255, 0, 0, 0.4)' },
     };
 }
 
@@ -72,11 +64,61 @@ export default function GameRoom() {
     const chessRef = useRef(new Chess());
     const movesEndRef = useRef(null);
     const handleReconnectedRef = useRef(null);
-    const updateTurnRef = useRef(null);
+    const joinRoomActiveRef = useRef(false);
 
     // Keep refs in sync
     handleReconnectedRef.current = handleReconnected;
-    updateTurnRef.current = updateTurn;
+
+    // ─── Persistent socket listeners (join_result, room_created) ──────────────────
+    useEffect(() => {
+        socket.on('room_created', ({ roomId: newId }) => {
+            if (joinRoomActiveRef.current) {
+                joinRoomActiveRef.current = false;
+                navigate(`/room/${newId}`, { replace: true });
+            }
+        });
+
+        socket.on('join_result', (res) => {
+            if (!joinRoomActiveRef.current) return;
+            if (res.error) {
+                if (res.error.code === 'ROOM_NOT_FOUND') {
+                    // Room doesn't exist — create it. Do NOT clear the ref yet;
+                    // the 'room_created' listener will handle the redirect.
+                    socket.emit('create_room');
+                } else {
+                    // Other errors → go back to lobby
+                    joinRoomActiveRef.current = false;
+                    navigate('/');
+                }
+            } else {
+                joinRoomActiveRef.current = false;
+                handleJoined(res);
+            }
+        });
+
+        socket.on('reconnected', (res) => {
+            handleReconnectedRef.current(res);
+        });
+
+        return () => {
+            socket.off('room_created');
+            socket.off('join_result');
+            socket.off('reconnected');
+        };
+    }, [navigate]);
+
+    // ─── Local clock interpolation ──────────────────────────────────
+    useEffect(() => {
+        if (status !== 'playing' || opponentDisconnected || !activeSide) return;
+        const interval = setInterval(() => {
+            if (activeSide === 'white') {
+                setWhiteTime((t) => Math.max(0, t - 1));
+            } else {
+                setBlackTime((t) => Math.max(0, t - 1));
+            }
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [status, opponentDisconnected, activeSide]);
 
     // ─── Join room on mount ──────────────────────────────────────────
     useEffect(() => {
@@ -87,12 +129,12 @@ export default function GameRoom() {
         if (savedToken && savedRoom === roomId) {
             // Attempt reconnect
             setReconnecting(true);
-            socket.emit('reconnect', { roomId, sessionToken: savedToken }, (res) => {
+            socket.emit('reconnect', { roomId, sessionToken: savedToken });
+            socket.once('reconnect_result', (res) => {
                 setReconnecting(false);
                 if (res.success) {
                     handleReconnected(res);
                 } else {
-                    // Session expired, join fresh
                     localStorage.removeItem('chess_session_token');
                     localStorage.removeItem('chess_session_room');
                     joinRoom();
@@ -101,23 +143,11 @@ export default function GameRoom() {
         } else {
             joinRoom();
         }
-    }, []); // eslint-disable-line
+    }, [roomId]); // eslint-disable-line
 
     function joinRoom() {
-        socket.emit('join_room', { roomId }, (res) => {
-            if (res.error) {
-                if (res.error.code === 'ROOM_NOT_FOUND') {
-                    // Create room
-                    socket.emit('create_room', ({ roomId: newId }) => {
-                        navigate(`/room/${newId}`, { replace: true });
-                    });
-                } else {
-                    navigate('/');
-                }
-            } else {
-                handleJoined(res);
-            }
-        });
+        joinRoomActiveRef.current = true;
+        socket.emit('join_room', { roomId });
     }
 
     function handleJoined(res) {
@@ -129,8 +159,7 @@ export default function GameRoom() {
         chessRef.current.load(res.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
         setFen(res.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
         setMoves(res.moves || []);
-        updateTurnRef.current(res.fen);
-        setStatus('waiting');
+        setStatus(res.status === 'playing' ? 'playing' : 'waiting');
     }
 
     function handleReconnected(res) {
@@ -145,18 +174,17 @@ export default function GameRoom() {
         setWhiteTime(res.whiteTime || 900);
         setBlackTime(res.blackTime || 900);
         setActiveSide(res.activeSide || 'white');
-        updateTurnRef.current(res.fen);
         setStatus('playing');
         setOpponentDisconnected(false);
     }
 
-    function updateTurn(fenStr) {
-        const chess = new Chess(fenStr);
+    useEffect(() => {
+        if (!fen) return;
+        const chess = new Chess(fen);
         const turn = chess.turn();
-        const isMyTurn = (color === 'white' && turn === 'w') || (color === 'black' && turn === 'b');
-        setMyTurn(isMyTurn);
+        setMyTurn((color === 'white' && turn === 'w') || (color === 'black' && turn === 'b'));
         setInCheck(chess.inCheck());
-    }
+    }, [color, fen]);
 
     // ─── Socket events ─────────────────────────────────────────────
     useEffect(() => {
@@ -174,7 +202,6 @@ export default function GameRoom() {
             chessRef.current.load(newFen);
             setFen(newFen);
             setMoves((prev) => [...prev, san]);
-            updateTurnRef.current(newFen);
             // Scroll move history
             setTimeout(() => {
                 movesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -218,7 +245,6 @@ export default function GameRoom() {
             setWhiteTime(wt);
             setBlackTime(bt);
             setActiveSide(as);
-            updateTurnRef.current(newFen);
             setGameOverData(null);
             setAiData(null);
             setAiError(null);
@@ -263,7 +289,7 @@ export default function GameRoom() {
             socket.io.off('reconnect_attempt');
             socket.io.off('reconnect');
         };
-    }, [handleReconnectedRef, updateTurnRef, roomId]);
+    }, [handleReconnectedRef, roomId]);
 
     // ─── Make a move ───────────────────────────────────────────────
     const onPieceDrop = useCallback((sourceSquare, targetSquare) => {
@@ -282,7 +308,6 @@ export default function GameRoom() {
         const newFen = chessRef.current.fen();
         setFen(newFen);
         setMoves((prev) => [...prev, move.san]);
-        updateTurn(newFen);
 
         socket.emit('make_move', {
             room: roomId,
@@ -312,6 +337,9 @@ export default function GameRoom() {
 
     // ─── Helpers ─────────────────────────────────────────────────────
     const orientation = color === 'black' ? 'black' : 'white';
+    const opponentColor = color === 'white' ? 'black' : 'white';
+    const myTime = color === 'white' ? whiteTime : blackTime;
+    const opponentTime = color === 'white' ? blackTime : whiteTime;
 
     const resultLabel = gameOverData ? {
         '1-0': color === 'white' ? 'Bạn Thắng!' : 'Bạn Thua!',
@@ -325,6 +353,9 @@ export default function GameRoom() {
         resign: 'Đối thủ xin thua',
         stalemate: 'Pat',
     }[gameOverData?.reason] || '';
+
+    const squareStyles = useMemo(() => inCheck ? getCheckSquareStyles(fen) : {}, [inCheck, fen]);
+    const boardStyle = useMemo(() => ({ borderRadius: '4px' }), []);
 
     // ─── Render ─────────────────────────────────────────────────────
 
@@ -492,33 +523,45 @@ export default function GameRoom() {
             )}
 
             {/* Game Layout */}
-            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                {/* Left: Clocks */}
-                <Box>
-                    <GameClock
-                        whiteTime={whiteTime}
-                        blackTime={blackTime}
-                        activeSide={activeSide}
-                        myColor={color}
-                        opponentDisconnected={opponentDisconnected}
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 4, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                
+                {/* Left Column: Board and Player Cards */}
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                    {/* Opponent Card (Top) */}
+                    <PlayerCard
+                        name="Đối thủ"
+                        time={opponentTime}
+                        isActive={activeSide === opponentColor}
+                        color={opponentColor}
+                        isPaused={opponentDisconnected && activeSide !== opponentColor}
+                    />
+
+                    {/* Chess Board */}
+                    <Box sx={{ my: 0.5 }}>
+                        <Chessboard
+                            boardWidth={480}
+                            position={fen}
+                            onPieceDrop={onPieceDrop}
+                            boardOrientation={orientation}
+                            customBoardStyle={boardStyle}
+                            customSquareStyles={squareStyles}
+                        />
+                    </Box>
+
+                    {/* My Card (Bottom) */}
+                    <PlayerCard
+                        name="Bạn"
+                        time={myTime}
+                        isActive={activeSide === color}
+                        color={color}
+                        isPaused={opponentDisconnected && activeSide !== color}
                     />
                 </Box>
 
-                {/* Center: Board */}
-                <Box>
-                    <Chessboard
-                        position={fen}
-                        onPieceDrop={onPieceDrop}
-                        boardOrientation={orientation}
-                        customBoardStyle={{ borderRadius: '4px' }}
-                        customSquareStyles={inCheck ? getCheckSquareStyles(fen, orientation) : {}}
-                    />
-                </Box>
-
-                {/* Right: Side Panel */}
-                <Box sx={{ width: 220 }}>
+                {/* Right Column: Side Panel */}
+                <Box sx={{ width: 300, display: 'flex', flexDirection: 'column' }}>
                     {/* Move History */}
-                    <Paper sx={{ p: 2, mb: 2, background: '#16213e', maxHeight: 400, overflowY: 'auto' }}>
+                    <Paper sx={{ p: 2, mb: 2, background: '#16213e', height: 440, overflowY: 'auto' }}>
                         <Typography variant="subtitle2" sx={{ mb: 1, color: '#aaa' }}>
                             Lịch sử nước đi
                         </Typography>
@@ -529,14 +572,14 @@ export default function GameRoom() {
                         ) : (
                             <Box>
                                 {Array.from({ length: Math.ceil(moves.length / 2) }).map((_, i) => (
-                                    <Box key={i} sx={{ display: 'flex', gap: 0.5, mb: 0.25 }}>
-                                        <Typography variant="body2" sx={{ color: '#555', width: 20 }}>
+                                    <Box key={i} sx={{ display: 'flex', gap: 1, mb: 0.5, p: 0.5, borderRadius: 1, '&:hover': { background: '#1a2942' } }}>
+                                        <Typography variant="body2" sx={{ color: '#555', width: 24 }}>
                                             {i + 1}.
                                         </Typography>
-                                        <Typography variant="body2" sx={{ fontFamily: 'monospace', width: 50 }}>
+                                        <Typography variant="body2" sx={{ fontFamily: 'monospace', width: 80, fontWeight: 'bold' }}>
                                             {moves[i * 2] || ''}
                                         </Typography>
-                                        <Typography variant="body2" sx={{ fontFamily: 'monospace', width: 50 }}>
+                                        <Typography variant="body2" sx={{ fontFamily: 'monospace', width: 80, fontWeight: 'bold' }}>
                                             {moves[i * 2 + 1] || ''}
                                         </Typography>
                                     </Box>
@@ -547,11 +590,11 @@ export default function GameRoom() {
                     </Paper>
 
                     {/* Action Buttons */}
-                    <Stack spacing={1}>
-                        <Button variant="outlined" color="error" onClick={handleResign}>
+                    <Stack spacing={2} direction="row">
+                        <Button variant="outlined" color="error" onClick={handleResign} fullWidth>
                             Xin Thua
                         </Button>
-                        <Button variant="text" color="inherit" onClick={handleExitRoom}>
+                        <Button variant="outlined" color="inherit" onClick={handleExitRoom} fullWidth>
                             Thoát Phòng
                         </Button>
                     </Stack>
