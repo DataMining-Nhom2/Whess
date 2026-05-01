@@ -33,9 +33,16 @@ function generateSessionToken() {
 
 /**
  * Tạo phòng mới. Người tạo được gán phe Trắng.
+ * @param {number} durationMinutes Thời gian thi đấu (phút), mặc định 15
  * @returns {{ roomId: string, sessionToken: string }}
  */
-function createRoom() {
+function createRoom(durationMinutes = 15) {
+    const validDurations = [3, 5, 10, 15, 30];
+    if (!validDurations.includes(durationMinutes)) {
+        durationMinutes = 15;
+    }
+    const initialTime = durationMinutes * 60;
+
     const roomId = generateRoomId();
     const sessionToken = generateSessionToken();
     const room = {
@@ -46,9 +53,9 @@ function createRoom() {
         moves: [],
         clockTimes: [],
         fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-        timeControl: { initial: 900, increment: 0 }, // 15+0
-        whiteTimeLeft: 900,
-        blackTimeLeft: 900,
+        timeControl: { initial: initialTime, increment: 0 },
+        whiteTimeLeft: initialTime,
+        blackTimeLeft: initialTime,
         lastMoveTimestamp: null,
         currentTurn: 'w',
         result: null,

@@ -85,14 +85,15 @@ io.on('connection', (socket) => {
     console.log(`[Socket] ${socket.id} connected`);
 
     // --- Create Room ---
-    socket.on('create_room', () => {
+    socket.on('create_room', (data) => {
         // Leave any previous room first to avoid orphaned rooms
         const prevRoom = socket.data.roomId;
         if (prevRoom) {
             socket.leave(prevRoom);
         }
 
-        const { roomId } = roomManager.createRoom();
+        const durationMinutes = data?.durationMinutes ? parseInt(data.durationMinutes, 10) : 15;
+        const { roomId } = roomManager.createRoom(durationMinutes);
         socket.join(roomId);
 
         // Assign creator as white
@@ -101,7 +102,7 @@ io.on('connection', (socket) => {
         socket.data.color = assign.color;
 
         socket.emit('room_created', { roomId, sessionToken: assign.sessionToken });
-        console.log(`[Socket] ${socket.id} created room ${roomId} as ${assign.color}`);
+        console.log(`[Socket] ${socket.id} created room ${roomId} as ${assign.color} (Time: ${durationMinutes}m)`);
     });
 
     // --- Join Room ---

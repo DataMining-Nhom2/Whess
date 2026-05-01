@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Box, Button, TextField, Typography, Paper,
-    Stack, Alert
+    Stack, Alert, FormControl, InputLabel, Select, MenuItem
 } from '@mui/material';
 import socket from '../socket';
 
@@ -11,6 +11,7 @@ export default function Lobby() {
     const [roomInput, setRoomInput] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [durationMinutes, setDurationMinutes] = useState(15);
 
     const roomInputRef = useRef('');
     const createRoomActiveRef = useRef(false);
@@ -42,7 +43,7 @@ export default function Lobby() {
     const handleCreateRoom = () => {
         setLoading(true);
         createRoomActiveRef.current = true;
-        socket.emit('create_room');
+        socket.emit('create_room', { durationMinutes });
     };
 
     const handleJoinRoom = () => {
@@ -74,6 +75,24 @@ export default function Lobby() {
                 </Typography>
 
                 <Stack spacing={2}>
+                    <FormControl fullWidth>
+                        <InputLabel id="time-control-label">Thời gian thi đấu</InputLabel>
+                        <Select
+                            labelId="time-control-label"
+                            value={durationMinutes}
+                            label="Thời gian thi đấu"
+                            onChange={(e) => setDurationMinutes(e.target.value)}
+                            disabled={loading}
+                            sx={{ textAlign: 'left' }}
+                        >
+                            <MenuItem value={3}>3 phút</MenuItem>
+                            <MenuItem value={5}>5 phút</MenuItem>
+                            <MenuItem value={10}>10 phút</MenuItem>
+                            <MenuItem value={15}>15 phút</MenuItem>
+                            <MenuItem value={30}>30 phút</MenuItem>
+                        </Select>
+                    </FormControl>
+
                     <Button
                         variant="contained"
                         size="large"

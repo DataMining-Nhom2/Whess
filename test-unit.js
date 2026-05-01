@@ -20,6 +20,21 @@ console.log('PASS getRoom: ' + (room ? 'found' : 'not found'));
 assert(room !== null, 'Room should exist');
 assert(room.status === 'waiting', 'New room should be waiting');
 assert(room.players.white === null, 'White slot should be empty');
+assert(room.timeControl.initial === 900, 'Default time should be 900s');
+
+// Test: createRoom with custom time (5 mins)
+const { roomId: r_5m } = roomManager.createRoom(5);
+const room_5m = roomManager.getRoom(r_5m);
+console.log('PASS createRoom 5 mins');
+assert(room_5m.timeControl.initial === 300, '5 mins time should be 300s');
+assert(room_5m.whiteTimeLeft === 300, 'White time should be 300s');
+
+// Test: createRoom with invalid custom time (fallback to 15 mins)
+const { roomId: r_inv } = roomManager.createRoom(999);
+const room_inv = roomManager.getRoom(r_inv);
+console.log('PASS createRoom invalid time fallback');
+assert(room_inv.timeControl.initial === 900, 'Invalid time should fallback to 900s');
+
 
 // Test: assignPlayer - first player gets white
 const { success, color, sessionToken: token2 } = roomManager.assignPlayer(roomId, 'socket-1');
